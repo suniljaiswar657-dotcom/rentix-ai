@@ -8,7 +8,6 @@ const save = () => localStorage.setItem(storageKey, JSON.stringify({ payments: d
 const $ = (selector) => document.querySelector(selector);
 const money = (value) => "₹" + Number(value || 0).toLocaleString("en-IN");
 const initials = (name) => name.split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase();
-const save = () => localStorage.setItem("rentix-demo-data", JSON.stringify(data));
 const toast = (message) => { const el=$("#toast"); el.textContent=message; el.classList.add("show"); clearTimeout(toast.timer); toast.timer=setTimeout(()=>el.classList.remove("show"),2600); };
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
 function totals(){const expected=data.payments.reduce((sum,p)=>sum+p.amount,0);const collected=data.payments.filter(p=>p.status==="Paid").reduce((sum,p)=>sum+p.amount,0);return{expected,collected,pending:expected-collected,rate:expected?Math.round(collected/expected*100):0};}
