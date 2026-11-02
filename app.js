@@ -1,27 +1,10 @@
-const seed = {
-  properties: [
-    {id:1,name:"Lakeview Residency",address:"Kalyan West, Maharashtra",units:8,rent:28000,occupancy:"Occupied"},
-    {id:2,name:"Green Park Apartments",address:"Dombivli East, Maharashtra",units:4,rent:18000,occupancy:"Occupied"},
-    {id:3,name:"Sunrise Heights",address:"Thane, Maharashtra",units:6,rent:12000,occupancy:"Occupied"}
-  ],
-  tenants: [
-    {id:1,name:"Aarav Sharma",property:"Lakeview Residency",rent:18000,phone:"+91 98765 43210",lease:"Active"},
-    {id:2,name:"Meera Patel",property:"Green Park Apartments",rent:12000,phone:"+91 98765 12340",lease:"Active"},
-    {id:3,name:"Kabir Khan",property:"Sunrise Heights",rent:28000,phone:"+91 98765 67890",lease:"Active"}
-  ],
-  payments: [
-    {id:1,tenant:"Aarav Sharma",property:"Lakeview Residency",due:"05 Nov 2026",amount:18000,status:"Paid"},
-    {id:2,tenant:"Meera Patel",property:"Green Park Apartments",due:"07 Nov 2026",amount:12000,status:"Paid"},
-    {id:3,tenant:"Kabir Khan",property:"Sunrise Heights",due:"10 Nov 2026",amount:28000,status:"Pending"}
-  ],
-  maintenance: [
-    {id:1,title:"Kitchen tap leakage",property:"Lakeview Residency",reported:"Yesterday",status:"Open"},
-    {id:2,title:"Lift inspection",property:"Green Park Apartments",reported:"28 Oct 2026",status:"In progress"}
-  ]
-};
-let data;
-try { data = JSON.parse(localStorage.getItem("rentix-demo-data")) || structuredClone(seed); }
-catch { data = JSON.parse(JSON.stringify(seed)); }
+import { authClient, apiRequest } from "./auth-client.js";
+
+let data = { properties: [], tenants: [], payments: [], maintenance: [] };
+let authMode = "signin";
+let authUser = null;
+let storageKey = "rentix-ai-local-preview";
+const save = () => localStorage.setItem(storageKey, JSON.stringify({ payments: data.payments, maintenance: data.maintenance }));
 const $ = (selector) => document.querySelector(selector);
 const money = (value) => "₹" + Number(value || 0).toLocaleString("en-IN");
 const initials = (name) => name.split(/\s+/).map(part=>part[0]).join("").slice(0,2).toUpperCase();
@@ -67,10 +50,72 @@ function closeModal(){modal.classList.remove("open");modal.setAttribute("aria-hi
 $("#quickAdd").addEventListener("click",()=>openModal("property"));
 document.querySelectorAll("[data-add]").forEach(button=>button.addEventListener("click",()=>openModal(button.dataset.add)));
 $("#closeModal").addEventListener("click",closeModal);$("#cancelModal").addEventListener("click",closeModal);modal.addEventListener("click",event=>{if(event.target===modal)closeModal();});
-$("#recordForm").addEventListener("submit",event=>{event.preventDefault();const type=event.currentTarget.dataset.type;const values=Object.fromEntries(new FormData(event.currentTarget));const id=Date.now();if(type==="property"){data.properties.push({id,name:values.name,address:values.address,units:Number(values.units),rent:Number(values.rent),occupancy:"Available"});}
-if(type==="tenant"){data.tenants.push({id,name:values.name,property:values.property,rent:Number(values.rent),phone:values.phone,lease:"Active"});}
+$("#recordForm").addEventListener("submit",async event=>{event.preventDefault();const type=event.currentTarget.dataset.type;const values=Object.fromEntries(new FormData(event.currentTarget));const id=Date.now();const submit=event.currentTarget.querySelector('[type="submit"]');submit.disabled=true;try{
+if(type==="property"){await apiRequest("/api/properties",{method:"POST",body:JSON.stringify({name:values.name,address:values.address,unit_count:Number(values.units),monthly_rent:Number(values.rent),occupancy_status:"available"})});await loadAccount();}
+if(type==="tenant"){const property=data.properties.find(p=>p.name===values.property);await apiRequest("/api/tenants",{method:"POST",body:JSON.stringify({full_name:values.name,property_id:property?.id||null,monthly_rent:Number(values.rent),phone:values.phone})});await loadAccount();}
 if(type==="payment"){data.payments.push({id,tenant:values.tenant,property:values.property,due:values.due,amount:Number(values.amount),status:values.status});}
 if(type==="maintenance"){data.maintenance.push({id,title:values.title,property:values.property,reported:values.reported,status:values.status});}
-save();renderAll();closeModal();toast("Record saved in this browser.");event.currentTarget.reset();});
+save();renderAll();closeModal();toast(type==="property"||type==="tenant"?"Saved securely to your RENTIX account.":"Saved in this browser preview.");event.currentTarget.reset();
+}catch(error){toast(error.message||"Unable to save record.");}finally{submit.disabled=false;}});
 document.addEventListener("click",event=>{const button=event.target.closest("[data-paid]");if(!button)return;const payment=data.payments.find(item=>item.id===Number(button.dataset.paid));if(payment){payment.status="Paid";save();renderAll();toast("Payment marked as paid.");}});
 renderAll();
+
+function mapProperty(row){return {id:row.id,name:row.name,address:row.address,units:Number(row.unit_count),rent:Number(row.monthly_rent),occupancy:String(row.occupancy_status||"available").replace(/^./,c=>c.toUpperCase())};}
+function mapTenant(row){return {id:row.id,name:row.full_name,property:row.property_name||"Unassigned",rent:Number(row.monthly_rent),phone:row.phone||"—",lease:String(row.lease_status||"active").replace(/^./,c=>c.toUpperCase())};}
+async function loadAccount(){
+ const [properties,tenants]=await Promise.all([apiRequest("/api/properties"),apiRequest("/api/tenants")]);
+ data.properties=(properties.properties||[]).map(mapProperty);
+ data.tenants=(tenants.tenants||[]).map(mapTenant);
+ renderAll();
+}
+function showAuthError(message){$("#authError").textContent=message||"";}
+function setAuthMode(mode){
+ authMode=mode;const signup=mode==="signup";
+ $("#authTitle").textContent=signup?"Create your account":"Welcome back";
+ $("#authSubtitle").textContent=signup?"Set up your private rental workspace.":"Sign in to manage your rental portfolio.";
+ $("#authNameField").hidden=!signup;
+ $("#authName").required=signup;
+ $("#authPassword").autocomplete=signup?"new-password":"current-password";
+ $("#authSubmit").textContent=signup?"Create account":"Sign in";
+ $("#authSwitch").textContent=signup?"Already have an account? Sign in":"New to RENTIX AI? Create account";
+ showAuthError("");
+}
+async function bootstrap(){
+ $("#authGate").hidden=false;
+ try{
+  const result=await authClient.getSession();
+  const session=result?.data?.session;
+  authUser=result?.data?.user||session?.user||null;
+  if(!session){$("#authGate").hidden=false;return;}
+  const email=authUser?.email||"account";
+  storageKey="rentix-ai-local-preview:"+email.toLowerCase();
+  try{const saved=JSON.parse(localStorage.getItem(storageKey)||"{}");data.payments=saved.payments||[];data.maintenance=saved.maintenance||[];}catch{data.payments=[];data.maintenance=[];}
+  await loadAccount();
+  $("#authGate").hidden=true;
+  const actions=$(".top-actions");
+  actions.innerHTML='<span class="account-email">'+escapeHtml(email)+'</span><button class="signout-button" id="signOutButton" type="button">Sign out</button>';
+  $("#signOutButton").addEventListener("click",async()=>{await authClient.signOut();location.reload();});
+  $("#pageTitle").innerHTML="Welcome, "+escapeHtml(authUser?.name||email.split("@")[0])+' <span>✦</span>';
+ }catch(error){
+  console.error(error);
+  showAuthError("Could not load your account. Please sign in again.");
+  $("#authGate").hidden=false;
+ }
+}
+$("#authSwitch").addEventListener("click",()=>setAuthMode(authMode==="signin"?"signup":"signin"));
+$("#authForm").addEventListener("submit",async event=>{
+ event.preventDefault();showAuthError("");
+ const values=Object.fromEntries(new FormData(event.currentTarget));
+ const button=$("#authSubmit");button.disabled=true;button.textContent="Please wait…";
+ try{
+  const result=authMode==="signup"
+   ? await authClient.signUp.email({name:values.name,email:values.email,password:values.password})
+   : await authClient.signIn.email({email:values.email,password:values.password});
+  if(result?.error)throw new Error(result.error.message||"Authentication failed");
+  await bootstrap();
+  if(!$("#authGate").hidden)throw new Error("Sign-in succeeded but session could not be loaded. Please try again.");
+ }catch(error){showAuthError(error.message||"Unable to authenticate. Please check your details.");}
+ finally{button.disabled=false;button.textContent=authMode==="signup"?"Create account":"Sign in";}
+});
+setAuthMode("signin");
+bootstrap();
