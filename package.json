@@ -3,13 +3,18 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "engines": {
-    "node": ">=20"
-  },
+  "engines": { "node": ">=20" },
   "scripts": {
-    "check": "node --check api/health.js && node --check api/_lib/db.js"
+    "dev": "vite",
+    "build": "vite build",
+    "check": "node --check api/health.js && node --check api/_lib/db.js && node --check api/_lib/auth.js && node --check api/properties.js && node --check api/tenants.js"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^1.2.0"
+    "@neondatabase/neon-js": "^0.9.0-beta",
+    "@neondatabase/serverless": "^1.2.0",
+    "jose": "^6.1.3"
+  },
+  "devDependencies": {
+    "vite": "^7.1.12"
   }
 }
